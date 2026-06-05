@@ -17,7 +17,7 @@
     "@supabase/supabase-js": "^2.49.0",
     "tailwindcss": "^3.4.0",
     "satori": "^0.10.0",
-    "resvg-js": "^2.6.0",
+    "@resvg/resvg-js": "^2.6.0",
     "lucide-react": "^0.454.0"
   },
   "devDependencies": {

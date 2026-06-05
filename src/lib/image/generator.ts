@@ -1,6 +1,9 @@
 import satori from 'satori';
-import { Resvg } from 'resvg-js';
+import { Resvg } from '@resvg/resvg-js';
 import type { Purchase } from '../types';
+
+import fs from 'fs/promises';
+import path from 'path';
 
 export async function generateWallImage(
   slots: Array<{
@@ -15,6 +18,10 @@ export async function generateWallImage(
 ): Promise<Buffer> {
   const occupancyPercent = Math.round((occupiedCredits / totalCredits) * 100);
 
+  // Load font
+  const fontPath = path.join(process.cwd(), 'public/fonts/Inter-Bold.ttf');
+  const fontData = await fs.readFile(fontPath);
+
   const svg = await satori(
     {
       type: 'div' as any,
@@ -27,7 +34,7 @@ export async function generateWallImage(
           backgroundColor: '#0f172a',
           padding: '40px',
           color: '#ffffff',
-          fontFamily: 'system-ui',
+          fontFamily: 'Inter',
         },
         children: [
           // Header
@@ -88,7 +95,14 @@ export async function generateWallImage(
     {
       width: 1200,
       height: 600,
-      fonts: [],
+      fonts: [
+        {
+          name: 'Inter',
+          data: fontData,
+          weight: 700,
+          style: 'normal',
+        },
+      ],
     }
   );
 

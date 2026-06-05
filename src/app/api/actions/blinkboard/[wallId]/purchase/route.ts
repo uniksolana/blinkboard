@@ -100,7 +100,7 @@ export async function POST(
     const transactionBase64 = await createUSDCTransferTransaction(
       validated.buyerWallet,
       validated.amount,
-      validated.slotId
+      purchase.id
     );
 
     const response: PostBlinkResponse = {
