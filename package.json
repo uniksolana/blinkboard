@@ -15,7 +15,7 @@
     "@solana/web3.js": "^1.98.0",
     "@supabase/supabase-js": "^2.49.0",
     "lucide-react": "^0.454.0",
-    "next": "15.2.0",
+    "next": "^16.2.7",
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "satori": "^0.10.0",
