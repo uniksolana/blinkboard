@@ -1,7 +1,11 @@
-import { withMiddlewareAuthRequired } from '@auth0/nextjs-auth0/edge';
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 
-export default withMiddlewareAuthRequired();
+// MVP: Allow all requests through. Auth0 will be added later.
+export function middleware(request: NextRequest) {
+  return NextResponse.next();
+}
 
 export const config = {
-  matcher: ['/dashboard/:path*', '/api/walls/:path*', '/api/webhooks/helius'],
+  matcher: ['/dashboard/:path*'],
 };
