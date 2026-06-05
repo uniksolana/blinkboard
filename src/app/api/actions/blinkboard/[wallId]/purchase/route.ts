@@ -8,10 +8,10 @@ export const runtime = 'nodejs';
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { wallId: string } }
+  { params }: { params: Promise<{ wallId: string }> }
 ) {
   try {
-    const { wallId } = params;
+    const { wallId } = await params;
     const body = await request.json();
 
     // Validate request
