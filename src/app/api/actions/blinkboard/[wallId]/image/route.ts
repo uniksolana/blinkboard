@@ -48,7 +48,7 @@ export async function GET(
       wall.total_credits
     );
 
-    return new NextResponse(imageBuffer, {
+    return new NextResponse(new Uint8Array(imageBuffer), {
       headers: {
         'Content-Type': 'image/png',
         'Cache-Control': 'public, max-age=300', // 5 minutes cache
