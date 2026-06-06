@@ -16,6 +16,7 @@ CREATE TABLE walls (
   creator_id UUID NOT NULL REFERENCES creators(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   layout_type TEXT NOT NULL CHECK (layout_type IN ('EXCLUSIVE', 'GRANDE', 'MEDIANA', 'COMUNITARIA', 'HYBRID')),
+  wallet_address TEXT,
   total_slots INTEGER NOT NULL DEFAULT 64,
   total_credits INTEGER NOT NULL DEFAULT 64,
   occupied_credits INTEGER NOT NULL DEFAULT 0,

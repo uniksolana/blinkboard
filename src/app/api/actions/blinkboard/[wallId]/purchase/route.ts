@@ -12,7 +12,22 @@ export async function POST(
 ) {
   try {
     const { wallId } = await params;
-    const body = await request.json();
+    const body = await request.json().catch(() => ({}));
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+
+    // If slotId is not provided, we redirect the user to the web configuration/selection page
+    if (!body.slotId) {
+      return NextResponse.json({
+        message: 'Redirigiendo a la web para elegir tu slot...',
+        redirect: `${baseUrl}/walls/${wallId}`,
+      }, {
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        }
+      });
+    }
 
     // Validate request
     const validated = createPurchaseSchema.parse({
@@ -108,12 +123,25 @@ export async function POST(
       message: `Transacción preparada. Costo: ${validated.amount} USDC durante ${durationDays} días.`,
     };
 
-    return NextResponse.json(response);
+    return NextResponse.json(response, {
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      },
+    });
   } catch (error) {
     console.error('Error in POST /purchase:', error);
     return NextResponse.json(
       { error: 'Failed to process purchase' },
-      { status: 500 }
+      {
+        status: 500,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        },
+      }
     );
   }
 }

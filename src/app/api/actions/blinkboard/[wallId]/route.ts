@@ -29,28 +29,16 @@ export async function GET(
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
     const imageUrl = `${baseUrl}/api/actions/blinkboard/${wallId}/image?t=${Date.now()}`;
 
-    const response: GetBlinkResponse = {
+    const response: any = {
       title: `BlinkBoard: ${wall.name}`,
-      description: `¡Anúnciate en este muro! Ocupación: ${occupiedSlots}/${totalSlots}. Compra tu espacio directamente desde este Blink.`,
+      description: `¡Anúnciate en este muro! Ocupación: ${occupiedSlots}/${totalSlots}. Elige tu espacio, conéctate con X y paga en segundos.`,
       image: imageUrl,
-      label: 'Comprar Espacio',
+      label: 'Elegir Slot y Comprar',
       links: {
         actions: [
           {
-            label: 'Comprar Slot',
+            label: 'Elegir Slot y Comprar',
             href: `${baseUrl}/api/actions/blinkboard/${wallId}/purchase`,
-            parameters: [
-              {
-                name: 'slotId',
-                label: 'ID del Slot (Selecciona de la lista)',
-                required: true,
-              },
-              {
-                name: 'duration',
-                label: 'Duración (DAILY, WEEKLY, MONTHLY)',
-                required: true,
-              }
-            ],
           },
         ],
       },

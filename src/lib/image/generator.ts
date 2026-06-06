@@ -78,13 +78,12 @@ export async function generateWallImage(
             type: 'div',
             props: {
               style: {
-                display: 'grid',
-                gridTemplateColumns: 'repeat(8, 1fr)',
-                gap: '4px',
-                flex: 1,
+                position: 'relative',
+                width: '480px',
+                height: '480px',
                 backgroundColor: '#1e293b',
-                padding: '20px',
                 borderRadius: '8px',
+                alignSelf: 'center',
               },
               children: slots.map((slot) => renderSlotCell(slot)),
             },
@@ -117,14 +116,24 @@ export async function generateWallImage(
 
 function renderSlotCell(slot: any) {
   const { x, y, size, tier, purchase } = slot;
+  const CELL_SIZE = 60;
+  const GAP = 4;
+
+  const left = x * CELL_SIZE;
+  const top = y * CELL_SIZE;
+  const width = size * CELL_SIZE - GAP;
+  const height = size * CELL_SIZE - GAP;
 
   if (purchase) {
     return {
       type: 'div',
       props: {
         style: {
-          gridColumn: `${x + 1} / span ${size}`,
-          gridRow: `${y + 1} / span ${size}`,
+          position: 'absolute',
+          left: `${left}px`,
+          top: `${top}px`,
+          width: `${width}px`,
+          height: `${height}px`,
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
@@ -179,8 +188,11 @@ function renderSlotCell(slot: any) {
     type: 'div',
     props: {
       style: {
-        gridColumn: `${x + 1} / span ${size}`,
-        gridRow: `${y + 1} / span ${size}`,
+        position: 'absolute',
+        left: `${left}px`,
+        top: `${top}px`,
+        width: `${width}px`,
+        height: `${height}px`,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',

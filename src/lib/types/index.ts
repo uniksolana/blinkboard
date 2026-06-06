@@ -16,10 +16,14 @@ export interface Wall {
   creator_id: string;
   name: string;
   layout_type: 'EXCLUSIVE' | 'GRANDE' | 'MEDIANA' | 'COMUNITARIA' | 'HYBRID';
+  wallet_address: string | null;
   total_slots: number;
   total_credits: number; // Always 64
   occupied_credits: number;
   is_active: boolean;
+  layout_config: {
+    prices: Record<string, number>;
+  } | null;
   created_at: string;
   updated_at: string;
 }
