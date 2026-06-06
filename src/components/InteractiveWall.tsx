@@ -64,7 +64,7 @@ export function InteractiveWall({
       >
         {slots.map((slot) => {
           const isSelected = selectedSlotId === slot.id;
-          const isOccupied = slot.status === 'OCCUPIED' && slot.purchase;
+          const isOccupied = slot.status === 'OCCUPIED' && !!slot.purchase;
           const isReserved = slot.status === 'RESERVED';
           
           const colStart = slot.grid_x + 1;

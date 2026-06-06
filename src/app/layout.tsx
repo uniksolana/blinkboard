@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
-import '../../app/globals.css'; // Path to globals.css in the app directory
+import './globals.css';
 import { Providers } from './providers';
 import Link from 'next/link';
 

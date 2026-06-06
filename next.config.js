@@ -20,6 +20,7 @@ const nextConfig = {
       },
     ],
   },
+  serverExternalPackages: ['@resvg/resvg-js'],
   experimental: {
     esmExternals: true,
   },
