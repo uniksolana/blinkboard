@@ -26,10 +26,12 @@ const nextConfig = {
   },
   turbopack: {
     resolveAlias: {
-      // Stub out Privy's optional solana-program dependencies
-      // These are only used for the "Fund SOL Wallet" feature we don't need
-      '@solana-program/system': './src/lib/stubs/empty-module.mjs',
-      '@solana-program/token': './src/lib/stubs/empty-module.mjs',
+      // Stub out Privy/x402 optional solana-program dependencies with
+      // modules that export the exact named exports they expect.
+      // We don't use Privy's "Fund SOL Wallet" feature so these are safe stubs.
+      '@solana-program/system': './src/lib/stubs/solana-program-system.mjs',
+      '@solana-program/token': './src/lib/stubs/solana-program-token.mjs',
+      '@solana-program/token-2022': './src/lib/stubs/solana-program-token-2022.mjs',
       '@solana/kit/program-client-core': './src/lib/stubs/empty-module.mjs',
     },
   },
