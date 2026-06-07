@@ -11,8 +11,6 @@
   "dependencies": {
     "@privy-io/react-auth": "^3.29.2",
     "@resvg/resvg-js": "^2.6.0",
-    "@solana-program/system": "^0.12.2",
-    "@solana-program/token": "^0.6.0",
     "@solana/actions": "^1.0.0",
     "@solana/spl-token": "^0.4.14",
     "@solana/wallet-adapter-base": "^0.9.23",
