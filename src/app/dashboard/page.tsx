@@ -183,7 +183,7 @@ export default function DashboardPage() {
 
   const copyBlinkLink = (wallId: string) => {
     const baseUrl = window.location.origin;
-    const blinkUrl = `${baseUrl}/api/actions/blinkboard/${wallId}`;
+    const blinkUrl = `${baseUrl}/walls/${wallId}`;
     navigator.clipboard.writeText(blinkUrl);
     setCopiedId(wallId);
     setTimeout(() => setCopiedId(null), 2000);
