@@ -54,8 +54,11 @@ export async function GET(
         'Cache-Control': 'public, max-age=300', // 5 minutes cache
       },
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error generating Blink image:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json({ 
+      error: 'Internal Server Error',
+      details: error?.message || String(error)
+    }, { status: 500 });
   }
 }
