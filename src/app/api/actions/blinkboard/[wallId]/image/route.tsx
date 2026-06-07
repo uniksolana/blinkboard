@@ -6,10 +6,10 @@ export const runtime = 'edge';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { wallId: string } }
+  { params }: { params: Promise<{ wallId: string }> }
 ) {
   try {
-    const { wallId } = params;
+    const { wallId } = await params;
     const supabase = await createClient();
 
     // Get wall and its slots
