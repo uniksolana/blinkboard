@@ -128,7 +128,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
           logo: 'https://cryptologos.cc/logos/solana-sol-logo.png', // Fallback logo
         },
         embeddedWallets: {
-          createOnLogin: 'users-without-wallets',
+          solana: {
+            createOnLogin: 'users-without-wallets',
+          },
         },
       }}
     >
