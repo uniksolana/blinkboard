@@ -1,6 +1,10 @@
 {
   "rules": [
     {
+      "pathPattern": "/walls/**",
+      "apiPath": "/api/actions/blinkboard/**"
+    },
+    {
       "pathPattern": "/api/actions/blinkboard/**",
       "apiPath": "/api/actions/blinkboard/**"
     }
