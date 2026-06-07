@@ -26,7 +26,7 @@ export async function generateMetadata(
 
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://blinkboard-nu.vercel.app';
   // Use the image endpoint from the API action for the preview
-  const imageUrl = `${baseUrl}/api/actions/blinkboard/${wallId}/image?t=${Date.now()}`;
+  const imageUrl = `${baseUrl}/api/actions/blinkboard/${wallId}/image.png?t=${Date.now()}`;
 
   return {
     title: `${wall.name} | BlinkBoard`,

@@ -27,7 +27,7 @@ export async function GET(
     const totalSlots = wall.slots.length;
     
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-    const imageUrl = `${baseUrl}/api/actions/blinkboard/${wallId}/image?t=${Date.now()}`;
+    const imageUrl = `${baseUrl}/api/actions/blinkboard/${wallId}/image.png?t=${Date.now()}`;
 
     const response: any = {
       title: `BlinkBoard: ${wall.name}`,
