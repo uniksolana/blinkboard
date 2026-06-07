@@ -70,8 +70,8 @@ export async function GET(
             }}
           >
             <h1 style={{ margin: 0, fontSize: '48px', fontWeight: 'bold' }}>BlinkBoard</h1>
-            <div style={{ fontSize: '36px', fontWeight: 'bold', color: '#8b5cf6' }}>
-              {occupancyPercent}% ocupado
+            <div style={{ display: 'flex', fontSize: '36px', fontWeight: 'bold', color: '#8b5cf6' }}>
+              {occupancyPercent + '% ocupado'}
             </div>
           </div>
           <div
@@ -113,6 +113,7 @@ export async function GET(
                   >
                     <div
                       style={{
+                        display: 'flex',
                         width: '32px',
                         height: '32px',
                         borderRadius: '16px',
@@ -120,9 +121,9 @@ export async function GET(
                         marginBottom: '4px',
                       }}
                     />
-                    <span style={{ fontSize: '10px', fontWeight: 'bold' }}>
-                      @{slot.purchase.buyer_x_handle}
-                    </span>
+                    <div style={{ display: 'flex', fontSize: '10px', fontWeight: 'bold' }}>
+                      {'@' + slot.purchase.buyer_x_handle}
+                    </div>
                   </div>
                 );
               }
