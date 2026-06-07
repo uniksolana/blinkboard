@@ -18,9 +18,11 @@ export async function generateWallImage(
 ): Promise<Buffer> {
   const occupancyPercent = Math.round((occupiedCredits / totalCredits) * 100);
 
-  // Load font
-  const fontPath = path.join(process.cwd(), 'public/fonts/Inter-Bold.ttf');
-  const fontData = await fs.readFile(fontPath);
+  // Load font via fetch to avoid Vercel serverless file system issues
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://blinkboard-nu.vercel.app';
+  const fontUrl = `${baseUrl}/fonts/Inter-Bold.ttf`;
+  const fontResponse = await fetch(fontUrl);
+  const fontData = await fontResponse.arrayBuffer();
 
   const svg = await satori(
     {
