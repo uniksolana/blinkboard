@@ -80,16 +80,16 @@ export default function DashboardPage() {
   const loadCreatorWalls = async () => {
     setLoadingWalls(true);
     try {
-      // Create creator profile in database if it doesn't exist (Local simulation convenience)
+      // Create or update creator profile in database when user accesses dashboard
       if (user) {
+        // We use x_id as the unique identifier for upserting, letting Supabase generate the UUID PK.
         await supabase.from('creators').upsert({
-          id: user.id,
-          auth0_id: `auth0|${user.x_id}`,
+          auth0_id: user.id, // Storing privy DID here
           x_handle: user.x_handle,
           x_id: user.x_id,
           avatar_url: user.avatar_url,
           wallet_address: walletAddress || null
-        });
+        }, { onConflict: 'x_id' });
       }
 
       const { data, error } = await supabase

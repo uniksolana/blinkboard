@@ -1,27 +1,31 @@
 'use client';
 
-import React, { useMemo, createContext, useContext, useState, useEffect } from 'react';
+import React, { useMemo, createContext, useContext, useEffect, useState } from 'react';
 import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react';
 import { WalletAdapterNetwork } from '@solana/wallet-adapter-base';
 import { PhantomWalletAdapter, SolflareWalletAdapter } from '@solana/wallet-adapter-wallets';
 import { WalletModalProvider } from '@solana/wallet-adapter-react-ui';
 import { clusterApiUrl } from '@solana/web3.js';
+import { PrivyProvider, usePrivy } from '@privy-io/react-auth';
+import { createClient } from '@/lib/supabase/client';
 
-// Import Solana Wallet adapter CSS (we will define styles or load default)
+// Import Solana Wallet adapter CSS
 import '@solana/wallet-adapter-react-ui/styles.css';
 
-// --- MOCK AUTHENTICATION SYSTEM ---
+// --- AUTHENTICATION ADAPTER SYSTEM ---
+// We adapt Privy's user model to our app's expected model
 interface AuthUser {
-  id: string;
+  id: string; // Internal or Privy ID
   x_handle: string;
   avatar_url: string;
   x_id: string;
+  wallet_address?: string;
 }
 
 interface AuthContextType {
   user: AuthUser | null;
   isLoading: boolean;
-  loginWithX: (role: 'creator' | 'sponsor', handle?: string) => Promise<void>;
+  loginWithX: (role?: 'creator' | 'sponsor') => void;
   logout: () => void;
   isMock: boolean;
 }
@@ -36,44 +40,57 @@ export function useAuth() {
   return context;
 }
 
-function MockAuthProvider({ children }: { children: React.ReactNode }) {
+function PrivyAuthAdapter({ children }: { children: React.ReactNode }) {
+  const { user: privyUser, ready, login, logout: privyLogout, authenticated } = usePrivy();
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Check local storage for mock session
-    const savedUser = localStorage.getItem('blinkboard_mock_user');
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
+    async function syncUser() {
+      if (ready && authenticated && privyUser) {
+        const supabase = createClient();
+        const twitter = privyUser.twitter;
+        
+        const x_handle = twitter?.username || privyUser.wallet?.address?.slice(0, 8) || 'anon';
+        const avatar_url = twitter?.profilePictureUrl || `https://unavatar.io/twitter/${x_handle}`;
+        const x_id = twitter?.subject || privyUser.id;
+        const wallet_address = privyUser.wallet?.address || null;
+
+        // Sync with Supabase to get the true internal UUID
+        const { data, error } = await supabase.from('creators').upsert({
+          auth0_id: privyUser.id,
+          x_handle: x_handle,
+          x_id: x_id,
+          avatar_url: avatar_url,
+          wallet_address: wallet_address
+        }, { onConflict: 'x_id' }).select().single();
+
+        if (!error && data) {
+          setUser({
+            id: data.id, // Internal UUID from Supabase
+            x_handle: data.x_handle,
+            avatar_url: data.avatar_url,
+            x_id: data.x_id,
+            wallet_address: data.wallet_address || '',
+          });
+        }
+      } else if (ready && !authenticated) {
+        setUser(null);
+      }
     }
-    setIsLoading(false);
-  }, []);
+    syncUser();
+  }, [privyUser, ready, authenticated]);
 
-  const loginWithX = async (role: 'creator' | 'sponsor', customHandle?: string) => {
-    setIsLoading(true);
-    // Simulate API delay
-    await new Promise((resolve) => setTimeout(resolve, 800));
-
-    const handle = customHandle || (role === 'creator' ? 'cryptocreator' : 'sponsor_anon');
-    const mockUser: AuthUser = {
-      id: role === 'creator' ? 'c1111111-1111-1111-1111-111111111111' : 's2222222-2222-2222-2222-222222222222',
-      x_handle: handle,
-      avatar_url: `https://unavatar.io/twitter/${handle}`,
-      x_id: Math.floor(Math.random() * 1000000000).toString(),
-    };
-
-    localStorage.setItem('blinkboard_mock_user', JSON.stringify(mockUser));
-    setUser(mockUser);
-    setIsLoading(false);
+  const loginWithX = (role?: 'creator' | 'sponsor') => {
+    login(); // Privy opens its own highly optimized modal
   };
 
   const logout = () => {
-    localStorage.removeItem('blinkboard_mock_user');
+    privyLogout();
     setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, loginWithX, logout, isMock: true }}>
+    <AuthContext.Provider value={{ user, isLoading: !ready, loginWithX, logout, isMock: false }}>
       {children}
     </AuthContext.Provider>
   );
@@ -101,14 +118,29 @@ export function Providers({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <ConnectionProvider endpoint={endpoint}>
-      <WalletProvider wallets={wallets} autoConnect>
-        <WalletModalProvider>
-          <MockAuthProvider>
-            {children}
-          </MockAuthProvider>
-        </WalletModalProvider>
-      </WalletProvider>
-    </ConnectionProvider>
+    <PrivyProvider
+      appId={process.env.NEXT_PUBLIC_PRIVY_APP_ID || 'insert-privy-app-id'}
+      config={{
+        loginMethods: ['twitter', 'wallet'],
+        appearance: {
+          theme: 'dark',
+          accentColor: '#00ff88',
+          logo: 'https://cryptologos.cc/logos/solana-sol-logo.png', // Fallback logo
+        },
+        embeddedWallets: {
+          createOnLogin: 'users-without-wallets',
+        },
+      }}
+    >
+      <ConnectionProvider endpoint={endpoint}>
+        <WalletProvider wallets={wallets} autoConnect>
+          <WalletModalProvider>
+            <PrivyAuthAdapter>
+              {children}
+            </PrivyAuthAdapter>
+          </WalletModalProvider>
+        </WalletProvider>
+      </ConnectionProvider>
+    </PrivyProvider>
   );
 }
