@@ -15,6 +15,8 @@ export interface SlotWithPurchase {
   purchase?: {
     buyer_x_handle: string;
     buyer_avatar_url: string;
+    message?: string | null;
+    expires_at?: string;
   } | null;
 }
 
@@ -78,6 +80,7 @@ export function InteractiveWall({
               key={slot.id}
               onClick={() => interactive && onSlotSelect && onSlotSelect(slot)}
               disabled={!interactive || isOccupied || isReserved}
+              title={isOccupied ? `@${slot.purchase!.buyer_x_handle}${slot.purchase!.message ? ' · ' + slot.purchase!.message : ''}` : undefined}
               style={{
                 gridColumn: `${colStart} / span ${span}`,
                 gridRow: `${rowStart} / span ${span}`,

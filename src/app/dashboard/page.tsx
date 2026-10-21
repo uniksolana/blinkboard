@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../providers';
 import { packSlots, PackedSlot } from '@/lib/algorithms/packing';
 import { InteractiveWall, SlotWithPurchase } from '@/components/InteractiveWall';
-import { createClient } from '@/lib/supabase/client';
+import { TIERS, WALL_TEMPLATES } from '@/lib/solana/constants';
 import { Loader2, Copy, Check, ExternalLink, Plus, LogOut } from 'lucide-react';
 
 interface WallListItem {
@@ -18,7 +18,7 @@ interface WallListItem {
 }
 
 export default function DashboardPage() {
-  const { user, loginWithX, logout, isLoading: authLoading } = useAuth();
+  const { user, loginWithX, logout, authFetch, isLoading: authLoading } = useAuth();
   
   // States
   const [walls, setWalls] = useState<WallListItem[]>([]);
@@ -40,26 +40,17 @@ export default function DashboardPage() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [previewSlots, setPreviewSlots] = useState<SlotWithPurchase[]>([]);
 
-  const supabase = createClient();
-
   // Load existing walls when user is logged in
   useEffect(() => {
     if (user) {
       loadCreatorWalls();
+      if (user.wallet_address) setWalletAddress((prev) => prev || user.wallet_address || '');
     }
-  }, [user]);
+  }, [user?.id]);
 
   // Generate preview slots when template changes
   useEffect(() => {
-    const templateCounts: Record<string, Record<string, number>> = {
-      EXCLUSIVE: { VIP: 4 }, // 4 slots of 4x4
-      GRANDE: { VIP: 4 },
-      MEDIANA: { GOLD: 16 }, // 16 slots of 2x2
-      COMUNITARIA: { STANDARD: 64 }, // 64 slots of 1x1
-      HYBRID: { VIP: 1, PLATINUM: 2, GOLD: 4, STANDARD: 14 }, // Mix: 16 + 18 + 16 + 14 = 64
-    };
-
-    const counts = templateCounts[layoutType];
+    const counts = WALL_TEMPLATES[layoutType] as Record<string, number>;
     const packedResult = packSlots(counts);
 
     if (packedResult.isValid) {
@@ -80,25 +71,11 @@ export default function DashboardPage() {
   const loadCreatorWalls = async () => {
     setLoadingWalls(true);
     try {
-      // Create or update creator profile in database when user accesses dashboard
-      if (user) {
-        // We use x_id as the unique identifier for upserting, letting Supabase generate the UUID PK.
-        await supabase.from('creators').upsert({
-          auth0_id: user.id, // Storing privy DID here
-          x_handle: user.x_handle,
-          x_id: user.x_id,
-          avatar_url: user.avatar_url,
-          wallet_address: walletAddress || null
-        }, { onConflict: 'x_id' });
-      }
-
-      const { data, error } = await supabase
-        .from('walls')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setWalls(data || []);
+      // Solo los muros del creador autenticado (verificado en el servidor)
+      const res = await authFetch('/api/walls/mine');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setWalls(data.walls || []);
     } catch (err) {
       console.error('Error loading walls:', err);
     } finally {
@@ -119,55 +96,27 @@ export default function DashboardPage() {
     if (!wallName.trim()) return alert('Por favor ingresa un nombre para el muro');
     if (!walletAddress.trim()) return alert('Por favor ingresa la wallet de destino para los USDC');
 
+    const belowMin = (Object.keys(prices) as (keyof typeof prices)[]).find(
+      (tier) => prices[tier] < TIERS[tier].minPriceUSDC
+    );
+    if (belowMin) {
+      return alert(`El precio mínimo de ${belowMin} es ${TIERS[belowMin].minPriceUSDC} USDC`);
+    }
+
     setCreating(true);
 
     try {
-      // 1. Create Wall in DB
-      const { data: wall, error: wallError } = await supabase
-        .from('walls')
-        .insert({
-          creator_id: user!.id,
-          name: wallName,
-          layout_type: layoutType,
-          wallet_address: walletAddress,
-          layout_config: { prices },
-          is_active: true,
-        })
-        .select()
-        .single();
-
-      if (wallError) throw wallError;
-
-      // 2. Generate packing slots
-      const templateCounts: Record<string, Record<string, number>> = {
-        EXCLUSIVE: { VIP: 4 },
-        GRANDE: { VIP: 4 },
-        MEDIANA: { GOLD: 16 },
-        COMUNITARIA: { STANDARD: 64 },
-        HYBRID: { VIP: 1, PLATINUM: 2, GOLD: 4, STANDARD: 14 },
-      };
-
-      const packedResult = packSlots(templateCounts[layoutType]);
-
-      if (!packedResult.isValid) {
-        throw new Error(packedResult.error || 'Error empaquetando los slots');
-      }
-
-      // 3. Insert slots to DB
-      const slotsToInsert = packedResult.slots.map(s => ({
-        wall_id: wall.id,
-        tier: s.tier,
-        grid_x: s.x,
-        grid_y: s.y,
-        grid_size: s.size,
-        status: 'AVAILABLE',
-      }));
-
-      const { error: slotsError } = await supabase
-        .from('slots')
-        .insert(slotsToInsert);
-
-      if (slotsError) throw slotsError;
+      const res = await authFetch('/api/walls/create', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: wallName.trim(),
+          layoutType,
+          walletAddress: walletAddress.trim(),
+          prices,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'No se pudo crear el muro');
 
       alert('¡Muro publicitario creado exitosamente!');
       setWallName('');
@@ -409,7 +358,7 @@ export default function DashboardPage() {
 
             {/* Price Config */}
             <div className="space-y-3 pt-2">
-              <label className="text-xs font-bold text-slate-400 block border-t border-white/5 pt-3">Ajustar Precios por Tier (USDC)</label>
+              <label className="text-xs font-bold text-slate-400 block border-t border-white/5 pt-3">Precio por día y tier (USDC) · 7 días = x5 · 30 días = x15</label>
               
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
@@ -419,7 +368,7 @@ export default function DashboardPage() {
                     value={prices.STANDARD}
                     onChange={e => handlePriceChange('STANDARD', e.target.value)}
                     className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-lg text-xs font-semibold focus:outline-none"
-                    min="1"
+                    min={TIERS.STANDARD.minPriceUSDC}
                   />
                 </div>
                 <div className="space-y-1">
@@ -429,7 +378,7 @@ export default function DashboardPage() {
                     value={prices.GOLD}
                     onChange={e => handlePriceChange('GOLD', e.target.value)}
                     className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-lg text-xs font-semibold focus:outline-none"
-                    min="1"
+                    min={TIERS.GOLD.minPriceUSDC}
                   />
                 </div>
                 <div className="space-y-1">
@@ -439,7 +388,7 @@ export default function DashboardPage() {
                     value={prices.PLATINUM}
                     onChange={e => handlePriceChange('PLATINUM', e.target.value)}
                     className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-lg text-xs font-semibold focus:outline-none"
-                    min="1"
+                    min={TIERS.PLATINUM.minPriceUSDC}
                   />
                 </div>
                 <div className="space-y-1">
@@ -449,7 +398,7 @@ export default function DashboardPage() {
                     value={prices.VIP}
                     onChange={e => handlePriceChange('VIP', e.target.value)}
                     className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-lg text-xs font-semibold focus:outline-none"
-                    min="1"
+                    min={TIERS.VIP.minPriceUSDC}
                   />
                 </div>
               </div>

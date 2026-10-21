@@ -15,7 +15,7 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "jsx": "preserve",
+    "jsx": "react-jsx",
     "strict": true,
     "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
@@ -44,12 +44,8 @@
   "include": [
     "next-env.d.ts",
     "src",
-    ".next/types/**/*.ts"
-  ],
-  "references": [
-    {
-      "path": "./tsconfig.app.json"
-    }
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

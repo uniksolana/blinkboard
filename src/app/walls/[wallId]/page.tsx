@@ -5,15 +5,15 @@ import { useParams } from 'next/navigation';
 import { useAuth } from '../../providers';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
-import { Transaction, PublicKey } from '@solana/web3.js';
+import { Transaction } from '@solana/web3.js';
 import { InteractiveWall, SlotWithPurchase } from '@/components/InteractiveWall';
-import { createClient } from '@/lib/supabase/client';
-import { Loader2, Calendar, Coins, User, ArrowLeft, ShieldCheck, HeartHandshake } from 'lucide-react';
+import { getSlotPriceUSDC } from '@/lib/pricing';
+import { Loader2, Calendar, Coins, User, ArrowLeft, ShieldCheck } from 'lucide-react';
 import Link from 'next/link';
 
 export default function WallPage() {
   const { wallId } = useParams() as { wallId: string };
-  const { user, loginWithX, isLoading: authLoading } = useAuth();
+  const { user, loginWithX, authFetch, isLoading: authLoading } = useAuth();
   const { publicKey, sendTransaction, connected } = useWallet();
   const { connection } = useConnection();
 
@@ -31,234 +31,94 @@ export default function WallPage() {
   const [buying, setBuying] = useState(false);
   const [purchaseStep, setPurchaseStep] = useState<string>('');
 
-  const supabase = createClient();
-
   useEffect(() => {
     if (wallId) {
       loadWallData();
     }
   }, [wallId]);
 
-  const loadWallData = async () => {
-    setLoading(true);
+  const loadWallData = async (showSpinner = true) => {
+    if (showSpinner) setLoading(true);
     try {
-      // 1. Get Wall details
-      const { data: wallData, error: wallError } = await supabase
-        .from('walls')
-        .select('*')
-        .eq('id', wallId)
-        .single();
-
-      if (wallError || !wallData) throw new Error('Muro no encontrado');
-      setWall(wallData);
-
-      // 2. Get Slots for this wall
-      const { data: slotsData, error: slotsError } = await supabase
-        .from('slots')
-        .select('*')
-        .eq('wall_id', wallId);
-
-      if (slotsError) throw slotsError;
-
-      // 3. Get Confirmed purchases for this wall
-      const { data: purchasesData } = await supabase
-        .from('purchases')
-        .select('*')
-        .eq('wall_id', wallId)
-        .eq('status', 'CONFIRMED');
-
-      // 4. Map slots to include purchase info
-      const mappedSlots: SlotWithPurchase[] = (slotsData || []).map(slot => {
-        const purchase = purchasesData?.find(p => p.slot_id === slot.id);
-        return {
-          id: slot.id,
-          wall_id: slot.wall_id,
-          tier: slot.tier,
-          grid_x: slot.grid_x,
-          grid_y: slot.grid_y,
-          grid_size: slot.grid_size,
-          status: slot.status,
-          price_usdc: wallData.layout_config?.prices?.[slot.tier] || 10,
-          purchase: purchase ? {
-            buyer_x_handle: purchase.buyer_x_handle,
-            buyer_avatar_url: purchase.buyer_avatar_url,
-          } : null,
-        };
-      });
-
-      setSlots(mappedSlots);
+      // Los datos públicos del muro se sirven desde el servidor
+      const res = await fetch(`/api/walls/${wallId}`, { cache: 'no-store' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Muro no encontrado');
+      setWall(data.wall);
+      setSlots(data.slots as SlotWithPurchase[]);
     } catch (err) {
       console.error('Error loading wall data:', err);
+      setWall(null);
     } finally {
       setLoading(false);
     }
   };
 
-  const getSlotPrice = (slot: SlotWithPurchase) => {
-    const basePrice = slot.price_usdc || 10;
-    const multiplier = duration === 'DAILY' ? 1 : duration === 'WEEKLY' ? 5 : 15;
-    return basePrice * multiplier;
+  const getSlotPrice = (slot: SlotWithPurchase) =>
+    getSlotPriceUSDC(wall?.prices, slot.tier, duration);
+
+  /** Pide al servidor que verifique la transacción on-chain (con reintentos). */
+  const confirmOnServer = async (purchaseId: string, txSignature: string) => {
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const res = await fetch('/api/purchase/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ purchaseId, txSignature }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) return;
+      if (res.status !== 202) throw new Error(data.error || 'No se pudo confirmar el pago');
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+    throw new Error(
+      'El pago se envió pero aún no se ha confirmado. Se aplicará automáticamente en unos minutos.'
+    );
   };
 
-  // --- ACTUAL SOLANA TRANSACTION FLOW ---
+  // --- FLUJO DE PAGO EN SOLANA ---
   const handleSolanaPurchase = async () => {
     if (!selectedSlot || !publicKey) return;
 
     setBuying(true);
-    setPurchaseStep('Preparando transacción...');
+    setPurchaseStep('Reservando el espacio...');
 
     try {
-      const price = getSlotPrice(selectedSlot);
-
-      // 1. Prepare transaction by hitting our POST Blink endpoint
-      const response = await fetch(`/api/actions/blinkboard/${wallId}/purchase`, {
+      // 1. El servidor reserva el slot, calcula el precio y prepara la transacción
+      const response = await authFetch(`/api/actions/blinkboard/${wallId}/purchase`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           slotId: selectedSlot.id,
           buyerWallet: publicKey.toBase58(),
-          amount: price,
-          duration: duration,
-          message: customMessage,
-          // Pass mock buyer profile info from Auth0
-          buyerId: user?.id,
-          buyerXHandle: user?.x_handle,
-          buyerXId: user?.x_id,
-          buyerAvatarUrl: user?.avatar_url,
+          duration,
+          message: customMessage || null,
         }),
       });
 
       const resData = await response.json();
-      if (!response.ok || !resData.transaction) {
-        throw new Error(resData.error || 'No se pudo crear la transacción');
+      if (!response.ok || !resData.transaction || !resData.purchaseId) {
+        throw new Error(resData.error || resData.message || 'No se pudo crear la transacción');
       }
 
-      setPurchaseStep('Firmando en tu wallet...');
-      
-      // 2. Deserialize transaction
+      setPurchaseStep(`Firma el pago de ${resData.amount} USDC en tu wallet...`);
       const transaction = Transaction.from(Buffer.from(resData.transaction, 'base64'));
-
-      // 3. Send and sign transaction
       const signature = await sendTransaction(transaction, connection);
 
       setPurchaseStep('Confirmando en la blockchain...');
       await connection.confirmTransaction(signature, 'confirmed');
 
-      // 4. Extract purchaseId from the transaction memo
-      const memoInstruction = transaction.instructions.find(ins => 
-        ins.programId.equals(new PublicKey('MemoSq4gqAB2Cc9BnG6zbxDBZid3p6fG9iz9zV7Aup'))
-      );
-      
-      let purchaseId = '';
-      if (memoInstruction) {
-        purchaseId = memoInstruction.data.toString('utf-8').split(':')[1];
-      }
-
-      if (!purchaseId) {
-        throw new Error('No se pudo verificar el identificador del pago en la transacción');
-      }
-
-      setPurchaseStep('Guardando en el muro...');
-
-      // 5. Finalize status in backend
-      const confirmRes = await fetch('/api/purchase/confirm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          purchaseId,
-          txSignature: signature,
-        }),
-      });
-
-      if (!confirmRes.ok) {
-        throw new Error('Error al confirmar el slot en la base de datos');
-      }
+      setPurchaseStep('Verificando el pago...');
+      await confirmOnServer(resData.purchaseId, signature);
 
       alert('¡Pago completado! El muro se ha actualizado.');
       setSelectedSlot(null);
-      loadWallData();
+      setCustomMessage('');
     } catch (err: any) {
       console.error('Solana purchase error:', err);
       alert(`Error en la compra: ${err.message || 'Operación cancelada'}`);
     } finally {
       setBuying(false);
       setPurchaseStep('');
-    }
-  };
-
-  // --- MOCK SIMULATED TRANSACTION FLOW (DEV BYPASS) ---
-  const handleSimulatedPurchase = async () => {
-    if (!selectedSlot || !user) return;
-
-    setBuying(true);
-    setPurchaseStep('Iniciando pago simulado...');
-
-    try {
-      const price = getSlotPrice(selectedSlot);
-
-      // 1. Prepare temporary purchase in Supabase
-      const response = await fetch(`/api/actions/blinkboard/${wallId}/purchase`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          slotId: selectedSlot.id,
-          buyerWallet: publicKey?.toBase58() || 'MOCK_WALLET_ADDRESS_1111111111111111',
-          amount: price,
-          duration: duration,
-          message: customMessage,
-          buyerId: user.id,
-          buyerXHandle: user.x_handle,
-          buyerXId: user.x_id,
-          buyerAvatarUrl: user.avatar_url,
-        }),
-      });
-
-      const resData = await response.json();
-      if (!response.ok || !resData.transaction) {
-        throw new Error(resData.error || 'No se pudo crear la transacción');
-      }
-
-      // 2. Deserialize transaction to extract purchaseId
-      const transaction = Transaction.from(Buffer.from(resData.transaction, 'base64'));
-      const memoInstruction = transaction.instructions.find(ins => 
-        ins.programId.equals(new PublicKey('MemoSq4gqAB2Cc9BnG6zbxDBZid3p6fG9iz9zV7Aup'))
-      );
-      
-      let purchaseId = '';
-      if (memoInstruction) {
-        purchaseId = memoInstruction.data.toString('utf-8').split(':')[1];
-      }
-
-      if (!purchaseId) {
-        throw new Error('No se pudo verificar el identificador del pago');
-      }
-
-      setPurchaseStep('Procesando pago de prueba (Bypass RPC)...');
-      await new Promise(r => setTimeout(r, 1200));
-
-      // 3. Directly hit the confirm API
-      const confirmRes = await fetch('/api/purchase/confirm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          purchaseId,
-          txSignature: `mock_tx_${Math.floor(Math.random() * 10000000)}`,
-        }),
-      });
-
-      if (!confirmRes.ok) {
-        throw new Error('Error al confirmar el slot en la base de datos');
-      }
-
-      alert('¡Pago de prueba simulado con éxito! Slot adquirido.');
-      setSelectedSlot(null);
-      loadWallData();
-    } catch (err: any) {
-      console.error('Simulated purchase error:', err);
-      alert(`Error en simulación: ${err.message}`);
-    } finally {
-      setBuying(false);
-      setPurchaseStep('');
+      loadWallData(false);
     }
   };
 
@@ -306,7 +166,7 @@ export default function WallPage() {
             slots={slots} 
             selectedSlotId={selectedSlot?.id} 
             onSlotSelect={(slot) => setSelectedSlot(slot)}
-            tierPrices={wall.layout_config?.prices}
+            tierPrices={wall.prices}
           />
         </div>
 
@@ -339,7 +199,7 @@ export default function WallPage() {
                   <h5 className="font-extrabold text-sm text-white mt-1">Tier {selectedSlot.tier} ({selectedSlot.grid_size}x{selectedSlot.grid_size})</h5>
                 </div>
                 <div className="text-right">
-                  <span className="text-[10px] text-slate-400 block">Precio Base</span>
+                  <span className="text-[10px] text-slate-400 block">Precio por día</span>
                   <span className="font-extrabold text-sm text-white">{selectedSlot.price_usdc} USDC</span>
                 </div>
               </div>
@@ -385,6 +245,7 @@ export default function WallPage() {
                   value={customMessage}
                   onChange={e => setCustomMessage(e.target.value)}
                   placeholder="Ej. Visita solana.com!"
+                  maxLength={140}
                   className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl focus:border-[#00ff88] text-xs focus:outline-none transition-colors"
                 />
               </div>
@@ -407,7 +268,7 @@ export default function WallPage() {
                       {authLoading ? (
                         <Loader2 className="w-4 h-4 animate-spin" />
                       ) : (
-                        <>Conectar con X (Auth0)</>
+                        <>Conectar con X</>
                       )}
                     </button>
                     <p className="text-[10px] text-slate-500 text-center">
@@ -445,7 +306,7 @@ export default function WallPage() {
                           </div>
 
                           {/* Solana Payment Button */}
-                          {connected && (
+                          {connected && wall.accepts_payments && (
                             <button
                               onClick={handleSolanaPurchase}
                               className="w-full py-3 bg-gradient-to-r from-[#00ff88] to-[#00e5ff] text-black font-extrabold text-xs rounded-xl hover:shadow-[0_0_15px_rgba(0,255,136,0.3)] transition-all duration-300 flex items-center justify-center gap-2"
@@ -454,14 +315,11 @@ export default function WallPage() {
                             </button>
                           )}
 
-                          {/* Dev Simulator Bypass (Extremely helpful for testing without mainnet balance) */}
-                          <button
-                            onClick={handleSimulatedPurchase}
-                            className="w-full py-3 border border-indigo-500/20 hover:border-indigo-500/40 text-indigo-300 hover:text-white font-extrabold text-xs rounded-xl transition-all duration-300 flex items-center justify-center gap-1.5 bg-indigo-950/20"
-                          >
-                            <HeartHandshake className="w-3.5 h-3.5 text-[#00ff88]" />
-                            Simular Pago de Prueba (Dev Mode)
-                          </button>
+                          {!wall.accepts_payments && (
+                            <p className="text-[10px] text-red-400 text-center">
+                              Este muro todavía no acepta pagos: el creador no ha configurado su wallet.
+                            </p>
+                          )}
                         </div>
                       )}
                     </div>
