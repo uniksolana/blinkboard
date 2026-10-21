@@ -1,13 +1,12 @@
 'use client';
 
-import React, { useMemo, createContext, useContext, useEffect, useState } from 'react';
+import React, { useMemo, createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react';
 import { WalletAdapterNetwork } from '@solana/wallet-adapter-base';
 import { PhantomWalletAdapter, SolflareWalletAdapter } from '@solana/wallet-adapter-wallets';
 import { WalletModalProvider } from '@solana/wallet-adapter-react-ui';
 import { clusterApiUrl } from '@solana/web3.js';
 import { PrivyProvider, usePrivy } from '@privy-io/react-auth';
-import { createClient } from '@/lib/supabase/client';
 
 // Import Solana Wallet adapter CSS
 import '@solana/wallet-adapter-react-ui/styles.css';
@@ -27,6 +26,10 @@ interface AuthContextType {
   isLoading: boolean;
   loginWithX: (role?: 'creator' | 'sponsor') => void;
   logout: () => void;
+  /** Devuelve el access token de Privy para llamar a la API (Authorization: Bearer) */
+  getAccessToken: () => Promise<string | null>;
+  /** fetch con el token de sesión incluido */
+  authFetch: (input: string, init?: RequestInit) => Promise<Response>;
   isMock: boolean;
 }
 
@@ -41,47 +44,56 @@ export function useAuth() {
 }
 
 function PrivyAuthAdapter({ children }: { children: React.ReactNode }) {
-  const { user: privyUser, ready, login, logout: privyLogout, authenticated } = usePrivy();
+  const { user: privyUser, ready, login, logout: privyLogout, authenticated, getAccessToken } = usePrivy();
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [syncing, setSyncing] = useState(false);
+
+  const authFetch = useCallback(
+    async (input: string, init: RequestInit = {}) => {
+      const token = await getAccessToken();
+      const headers = new Headers(init.headers);
+      if (token) headers.set('Authorization', `Bearer ${token}`);
+      if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+      return fetch(input, { ...init, headers });
+    },
+    [getAccessToken]
+  );
 
   useEffect(() => {
+    let cancelled = false;
     async function syncUser() {
       if (ready && authenticated && privyUser) {
-        const supabase = createClient();
-        const twitter = privyUser.twitter;
-        
-        const x_handle = twitter?.username || privyUser.wallet?.address?.slice(0, 8) || 'anon';
-        const avatar_url = twitter?.profilePictureUrl || `https://unavatar.io/twitter/${x_handle}`;
-        const x_id = twitter?.subject || privyUser.id;
-        const wallet_address = privyUser.wallet?.address || null;
-
-        // Sync with Supabase to get the true internal UUID
-        const { data, error } = await supabase.from('creators').upsert({
-          auth0_id: privyUser.id,
-          x_handle: x_handle,
-          x_id: x_id,
-          avatar_url: avatar_url,
-          wallet_address: wallet_address
-        }, { onConflict: 'x_id' }).select().single();
-
-        if (!error && data) {
-          setUser({
-            id: data.id, // Internal UUID from Supabase
-            x_handle: data.x_handle,
-            avatar_url: data.avatar_url,
-            x_id: data.x_id,
-            wallet_address: data.wallet_address || '',
-          });
+        setSyncing(true);
+        try {
+          // El servidor verifica el token y lee el perfil de X directamente de Privy
+          const res = await authFetch('/api/auth/sync', { method: 'POST' });
+          const data = await res.json();
+          if (!cancelled && res.ok && data.user) {
+            setUser({
+              id: data.user.id,
+              x_handle: data.user.x_handle,
+              avatar_url: data.user.avatar_url,
+              x_id: data.user.x_id,
+              wallet_address: data.user.wallet_address || '',
+            });
+          } else if (!res.ok) {
+            console.error('Error sincronizando usuario:', data.error);
+          }
+        } finally {
+          if (!cancelled) setSyncing(false);
         }
       } else if (ready && !authenticated) {
         setUser(null);
       }
     }
     syncUser();
-  }, [privyUser, ready, authenticated]);
+    return () => {
+      cancelled = true;
+    };
+  }, [privyUser?.id, ready, authenticated, authFetch]);
 
-  const loginWithX = (role?: 'creator' | 'sponsor') => {
-    login(); // Privy opens its own highly optimized modal
+  const loginWithX = (_role?: 'creator' | 'sponsor') => {
+    login();
   };
 
   const logout = () => {
@@ -90,7 +102,9 @@ function PrivyAuthAdapter({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, isLoading: !ready, loginWithX, logout, isMock: false }}>
+    <AuthContext.Provider
+      value={{ user, isLoading: !ready || syncing, loginWithX, logout, getAccessToken, authFetch, isMock: false }}
+    >
       {children}
     </AuthContext.Provider>
   );

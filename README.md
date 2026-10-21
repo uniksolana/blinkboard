@@ -1,269 +1,78 @@
-# BlinkBoard MVP
+# BlinkBoard
 
-**SaaS platform para creadores de contenido en X que permite monetizar muros publicitarios mediante Solana Actions & Blinks.**
+**SaaS para creadores de contenido en X: muros de patrocinadores que se venden en USDC mediante Solana Actions y Blinks.**
 
-## 🎯 Descripción
+## Qué hace
 
-BlinkBoard permite a los creadores:
-- ✅ Crear muros de patrocinadores digitales
-- ✅ Vender espacios publicitarios (slots) mediante USDC en Solana
-- ✅ Actualizar automáticamente el muro tras cada compra
-- ✅ Renderizar dinámicamente dentro de un Blink
+- El creador inicia sesión con X (Privy), crea un muro de 8x8 a partir de una plantilla y fija el precio diario de cada tier.
+- El muro se comparte en X como Blink: los compradores eligen tamaño y duración y pagan sin salir del timeline.
+- También se puede comprar un espacio concreto desde la web (`/walls/:id`).
+- El pago va **directamente a la wallet del creador** (con comisión opcional para la plataforma en la misma transacción).
+- El servidor verifica el pago en la blockchain antes de ocupar el espacio, y lo libera automáticamente cuando termina el periodo.
 
-## ⚡ Características MVP
+## Tiers y precios
 
-### Gestión de Muros
-- Registro de creadores mediante X (OAuth)
-- Creación rápida de muros (< 2 minutos)
-- 4 plantillas predefinidas + modo híbrido
-- Algoritmo determinístico de packing de slots
-
-### Sistema de Compra
-- Compra de slots en < 30 segundos
-- Pagos exclusivamente en USDC SPL
-- Reserva temporal (5 minutos máximo)
-- Confirmación en blockchain < 5 segundos tras webhook
-
-### Duración de Slots
-- **DAILY**: 1 día
-- **WEEKLY**: 7 días  
-- **MONTHLY**: 30 días
-
-### Tiers de Slots
-| Tier | Tamaño | Créditos | Precio Mínimo |
-|------|--------|----------|---------------|
+| Tier | Tamaño | Créditos | Precio mínimo / día |
+|------|--------|----------|---------------------|
 | STANDARD | 1x1 | 1 | 10 USDC |
 | GOLD | 2x2 | 4 | 30 USDC |
 | PLATINUM | 3x3 | 9 | 70 USDC |
-| VIP | 4x4 | 16 | Configurable |
+| VIP | 4x4 | 16 | 150 USDC |
 
-### Plantillas de Muros
-| Plantilla | Slots | Tamaño | Tier |
-|-----------|-------|--------|------|
-| EXCLUSIVE | 1 | 8x8 | VIP |
-| GRANDE | 4 | 4x4 | VIP |
-| MEDIANA | 16 | 2x2 | GOLD |
-| COMUNITARIA | 64 | 1x1 | STANDARD |
-| HYBRID | Variable | - | Mix |
+Duración: 1 día (x1), 7 días (x5), 30 días (x15). El precio **siempre se calcula en el servidor** (`src/lib/pricing.ts`).
 
-## 🛠️ Stack Tecnológico
-
-**Frontend:**
-- Next.js 15 (App Router)
-- TypeScript
-- TailwindCSS + shadcn/ui
-
-**Backend:**
-- Next.js API Routes
-- Vercel (deployment)
-
-**Base de Datos:**
-- Supabase PostgreSQL
-- Row Level Security (RLS)
-
-**Blockchain:**
-- Solana
-- Solana Actions & Blinks
-- SPL Token (USDC)
-- Helius RPC + Webhooks
-
-**Imágenes Dinámicas:**
-- Satori + Resvg
-
-**Autenticación:**
-- Auth0
-- Login con X
-
-## 📁 Estructura del Proyecto
+## Flujo de compra
 
 ```
-src/
-├── app/
-│   ├── api/
-│   │   ├── actions/blinkboard/[wallId]/
-│   │   │   ├── route.ts                    # GET Blink metadata
-│   │   │   ├── image/route.ts              # GET dynamic image
-│   │   │   └── purchase/route.ts           # POST USDC transaction
-│   │   ├── walls/create/route.ts           # POST wall creation
-│   │   └── webhooks/helius/route.ts        # POST blockchain webhook
-│   └── (dashboard)                         # Future: Dashboard UI
-├── lib/
-│   ├── algorithms/
-│   │   └── packing.ts                      # Deterministic slot placement
-│   ├── api/
-│   │   ├── validation.ts                   # Zod schemas
-│   │   └── errors.ts                       # Error handling
-│   ├── image/
-│   │   └── generator.ts                    # Dynamic image generation
-│   ├── solana/
-│   │   ├── actions.ts                      # Transaction logic
-│   │   └── constants.ts                    # Chain constants
-│   ├── supabase/
-│   │   ├── client.ts                       # Browser client
-│   │   ├── server.ts                       # Server client
-│   │   └── database.types.ts               # Generated types
-│   └── types/
-│       └── index.ts                        # TypeScript interfaces
-├── middleware.ts                           # Auth0 protection
-└── components/                             # React components (TBD)
-
-supabase/
-└── migrations/
-    └── 001_initial_schema.sql              # DB schema + RLS
+1. POST /api/actions/blinkboard/:wallId/purchase
+     -> reserva atómica del slot (5 min) + compra PENDING
+     -> devuelve transacción sin firmar: memo + transferencias USDC
+2. El comprador firma y envía la transacción
+3. Confirmación (cualquiera de las dos vías, son idempotentes):
+     a) El navegador llama a POST /api/purchase/confirm con la firma
+     b) Helius llama a POST /api/webhooks/helius
+   En ambos casos el servidor lee la tx de la blockchain y comprueba:
+     memo = id de la compra, firmante = comprador, mint = USDC,
+     importes recibidos por el creador y la tesorería
+4. confirm_purchase() (SQL) ocupa el slot de forma atómica
+5. release_expired_slots() libera reservas abandonadas y anuncios caducados
 ```
 
-## 🚀 Configuración Inicial
+Si alguien paga tarde y el slot ya lo ocupó otra persona, la compra queda en `FAILED` con `failure_reason = SLOT_TAKEN_REFUND_REQUIRED` para reembolsarla manualmente.
 
-### Prerequisites
-- Node.js 20+
-- npm o pnpm
-- Cuenta Supabase
-- Proyecto Auth0
-- Billetera Solana (devnet/mainnet)
-- API key Helius
+## Stack
 
-### Variables de Entorno
+- Next.js 16 (App Router) + TypeScript + Tailwind
+- Supabase Postgres (solo accesible desde el servidor con service role)
+- Privy (login con X, verificación de sesión con `jose`)
+- Solana web3.js + SPL Token (USDC), Solana Actions v2
+- `next/og` para la imagen dinámica del muro
+- Helius (RPC + webhooks), Vercel (hosting + cron)
 
-Copia `.env.example` a `.env.local`:
+## Puesta en marcha
 
-```bash
-cp .env.example .env.local
-```
+1. `npm install`
+2. Copia `.env.example` a `.env.local` y rellena las variables (todas están documentadas ahí).
+3. Aplica las migraciones en orden en Supabase (SQL editor o `supabase db push`):
+   - `supabase/migrations/001_initial_schema.sql`
+   - `supabase/migrations/002_functions.sql`
+   - `supabase/migrations/003_secure_payments.sql`
+4. En Helius crea un webhook sobre la wallet de tesorería o las wallets de creadores (tipo *enhanced* o *raw*) apuntando a `https://TU_DOMINIO/api/webhooks/helius` y pon `HELIUS_WEBHOOK_SECRET` en el campo **Auth Header**. Es opcional: la confirmación desde el navegador ya basta, el webhook cubre el caso de que el usuario cierre la pestaña.
+5. `npm run dev`
 
-Completa las variables:
+Para probar en devnet usa `NEXT_PUBLIC_SOLANA_NETWORK=devnet` y consigue USDC de prueba en [faucet.circle.com](https://faucet.circle.com).
 
-```env
-# Supabase
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+## API
 
-# Auth0
-AUTH0_SECRET=your_secret
-AUTH0_BASE_URL=http://localhost:3000
-AUTH0_ISSUER_BASE_URL=https://your-tenant.auth0.com
-AUTH0_CLIENT_ID=your_client_id
-AUTH0_CLIENT_SECRET=your_client_secret
-
-# Solana
-NEXT_PUBLIC_SOLANA_RPC_URL=https://rpc.helius.xyz
-HELIUS_API_KEY=your_helius_key
-NEXT_PUBLIC_SOLANA_NETWORK=devnet
-SOLANA_TREASURY_WALLET=your_treasury_address
-USDC_MINT_ADDRESS=EPjFWaJHqjZjqjZjqjZjqjZjqjZjqjZjqjZjqjZjqjZj
-
-# App
-NEXT_PUBLIC_APP_URL=http://localhost:3000
-IMAGE_CACHE_TTL=300
-```
-
-### Instalación & Configuración
-
-```bash
-# 1. Instalar dependencias
-npm install
-
-# 2. Crear tablas en Supabase
-npm run db:push
-
-# 3. Ejecutar servidor de desarrollo
-npm run dev
-```
-
-La aplicación estará disponible en `http://localhost:3000`
-
-## 📡 Endpoints API
-
-### Blinks (Solana Actions)
-
-**GET** `/api/actions/blinkboard/[wallId]`
-- Retorna metadata del Blink
-- Datos actualizados en tiempo real
-
-**GET** `/api/actions/blinkboard/[wallId]/image`
-- Genera imagen PNG dinámica del muro
-- Cache invalidable (5 min por defecto)
-
-**POST** `/api/actions/blinkboard/[wallId]/purchase`
-- Construye transacción USDC
-- Crea registro de compra (PENDING)
-- Retorna tx serializada en base64
-
-### Gestión de Muros
-
-**POST** `/api/walls/create`
-- Crea nuevo muro con packing de slots
-- Valida suma de créditos = 64
-
-### Webhooks
-
-**POST** `/api/webhooks/helius`
-- Valida transacciones en blockchain
-- Confirma compras
-- Actualiza estado de slots
-
-## 🔐 Algoritmo de Packing
-
-El algoritmo determinístico garantiza:
-- ✅ Suma exacta de 64 créditos
-- ✅ Sin solapamientos
-- ✅ Sin huecos vacíos
-- ✅ Posiciones consistentes
-
-**Implementación**: Greedy por tamaño (mayor→menor), row-major ordering.
-
-## 🔒 Seguridad
-
-- ✅ Row Level Security (RLS) en Supabase
-- ✅ Validación en backend
-- ✅ Validación blockchain de transacciones
-- ✅ Protección contra double-spending
-- ✅ Expiración automática de reservas (5 min)
-- ✅ Auth0 middleware en rutas protegidas
-
-## 🌐 Deployment
-
-La aplicación está configurada para **Vercel**:
-
-```bash
-# Deploy automático al push a main
-git push origin main
-```
-
-Configura estas variables en Vercel:
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `AUTH0_*` (todas las variables Auth0)
-- `SOLANA_*` y `HELIUS_*`
-- `NEXT_PUBLIC_APP_URL`
-
-## 🚧 Roadmap Post-MVP
-
-- [ ] Comisión de plataforma (8%)
-- [ ] Dashboard de creador
-- [ ] Analytics y reportes
-- [ ] Custom branding
-- [ ] Multi-moneda
-- [ ] Admin panel
-
-## 🤝 Contribuir
-
-1. Fork el repositorio
-2. Crea una rama: `git checkout -b feature/my-feature`
-3. Commit: `git commit -am 'Add feature'`
-4. Push: `git push origin feature/my-feature`
-5. Open Pull Request
-
-## 📄 Licencia
-
-MIT
-
-## 📧 Soporte
-
-- Email: support@blinkboard.xyz
-- X: @blinkboard_xyz
-
----
-
-**Construido con ❤️ por el equipo de Unik Solana**
+| Método | Ruta | Auth | Descripción |
+|--------|------|------|-------------|
+| POST | `/api/auth/sync` | Privy | Sincroniza el usuario con datos verificados de Privy |
+| GET | `/api/walls/mine` | Privy | Muros del creador |
+| POST | `/api/walls/create` | Privy | Crea un muro y sus slots |
+| GET | `/api/walls/:wallId` | — | Datos públicos del muro |
+| GET | `/api/actions/blinkboard/:wallId` | — | Metadatos del Blink |
+| POST | `/api/actions/blinkboard/:wallId/purchase` | Blink / Privy | Prepara la transacción de compra |
+| GET | `/api/actions/blinkboard/:wallId/image.png` | — | Imagen dinámica del muro |
+| POST | `/api/purchase/confirm` | — (verificación on-chain) | Confirma una compra |
+| POST | `/api/webhooks/helius` | `HELIUS_WEBHOOK_SECRET` | Confirmación por webhook |
+| GET | `/api/cron/release` | `CRON_SECRET` | Libera slots caducados (Vercel Cron) |

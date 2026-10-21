@@ -1,8 +1,10 @@
 import { NextRequest } from 'next/server';
 import { ImageResponse } from 'next/og';
 import { createClient } from '@/lib/supabase/server';
+import { releaseExpiredSlots } from '@/lib/purchases/service';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 export async function GET(
   request: NextRequest,
@@ -10,6 +12,7 @@ export async function GET(
 ) {
   try {
     const { wallId } = await params;
+    await releaseExpiredSlots();
     const supabase = await createClient();
 
     // Get wall and its slots
@@ -32,7 +35,8 @@ export async function GET(
 
     // Map slots
     const slotsForImage = wall.slots.map((slot: any) => {
-      const purchase = purchases?.find((p: any) => p.slot_id === slot.id);
+      const purchase =
+        slot.status === 'OCCUPIED' ? purchases?.find((p: any) => p.id === slot.current_purchase_id) : undefined;
       return {
         x: slot.grid_x,
         y: slot.grid_y,

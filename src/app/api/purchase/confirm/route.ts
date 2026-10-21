@@ -1,76 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { confirmSchema } from '@/lib/api/validation';
+import { errorResponse } from '@/lib/api/http';
+import { confirmBySignature } from '@/lib/purchases/service';
 
-// We use the service role key to bypass RLS policies for confirming purchases
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+export const runtime = 'nodejs';
 
+/**
+ * Confirmación iniciada por el navegador tras firmar.
+ * Es seguro llamarlo sin autenticación: solo confirma si la transacción
+ * existe en la blockchain y paga lo que corresponde a esta compra.
+ */
 export async function POST(request: NextRequest) {
   try {
-    const { purchaseId, txSignature } = await request.json();
+    const { purchaseId, txSignature } = confirmSchema.parse(await request.json());
+    const result = await confirmBySignature(txSignature, purchaseId);
 
-    if (!purchaseId) {
-      return NextResponse.json({ error: 'Missing purchaseId' }, { status: 400 });
+    switch (result.status) {
+      case 'CONFIRMED':
+      case 'ALREADY_CONFIRMED':
+        return NextResponse.json({ success: true, status: result.status });
+      case 'PENDING_ONCHAIN':
+        return NextResponse.json({ success: false, status: result.status, error: result.reason }, { status: 202 });
+      case 'SLOT_TAKEN':
+        return NextResponse.json(
+          { success: false, status: result.status, error: 'El espacio lo ocupó otra persona. Tu pago queda registrado para reembolso.' },
+          { status: 409 }
+        );
+      case 'NOT_FOUND':
+        return NextResponse.json({ success: false, status: result.status, error: result.reason }, { status: 404 });
+      default:
+        return NextResponse.json({ success: false, status: result.status, error: result.reason }, { status: 400 });
     }
-
-    // 1. Fetch the purchase
-    const { data: purchase, error: purchaseError } = await supabaseAdmin
-      .from('purchases')
-      .select('*')
-      .eq('id', purchaseId)
-      .single();
-
-    if (purchaseError || !purchase) {
-      return NextResponse.json({ error: 'Purchase not found' }, { status: 404 });
-    }
-
-    if (purchase.status === 'CONFIRMED') {
-      return NextResponse.json({ success: true, message: 'Already confirmed' });
-    }
-
-    // 2. Update purchase status
-    const { error: updatePurchaseError } = await supabaseAdmin
-      .from('purchases')
-      .update({
-        status: 'CONFIRMED',
-        tx_signature: txSignature || `mock_sig_${Math.random().toString(36).substring(7)}`,
-      })
-      .eq('id', purchaseId);
-
-    if (updatePurchaseError) {
-      return NextResponse.json({ error: 'Failed to update purchase status' }, { status: 500 });
-    }
-
-    // 3. Mark slot as occupied
-    const { error: updateSlotError } = await supabaseAdmin
-      .from('slots')
-      .update({ status: 'OCCUPIED' })
-      .eq('id', purchase.slot_id);
-
-    if (updateSlotError) {
-      console.error('Error updating slot status:', updateSlotError);
-    }
-
-    // 4. Update wall's occupied credits
-    const { data: slot } = await supabaseAdmin
-      .from('slots')
-      .select('grid_size')
-      .eq('id', purchase.slot_id)
-      .single();
-
-    if (slot) {
-      const credits = slot.grid_size * slot.grid_size;
-      await supabaseAdmin.rpc('increment_wall_credits', {
-        wall_id_param: purchase.wall_id,
-        credits_param: credits,
-      });
-    }
-
-    return NextResponse.json({ success: true });
-  } catch (error: any) {
-    console.error('Error confirming purchase:', error);
-    return NextResponse.json({ error: error.message || 'Internal Server Error' }, { status: 500 });
+  } catch (error) {
+    return errorResponse(error);
   }
 }

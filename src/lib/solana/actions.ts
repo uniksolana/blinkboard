@@ -1,65 +1,80 @@
+import 'server-only';
 import {
   Connection,
   PublicKey,
   Transaction,
-  ComputeBudgetProgram,
   TransactionInstruction,
+  ComputeBudgetProgram,
 } from '@solana/web3.js';
 import {
+  createAssociatedTokenAccountIdempotentInstruction,
   createTransferCheckedInstruction,
-  getAssociatedTokenAddress,
-  getMint,
+  getAssociatedTokenAddressSync,
 } from '@solana/spl-token';
-import { SOLANA_NETWORK, USDC_MINT, TREASURY_WALLET } from './constants';
+import { MEMO_PREFIX, MEMO_PROGRAM_ID, USDC_DECIMALS, USDC_MINT, getServerRpcUrl } from './constants';
 
-export async function createUSDCTransferTransaction(
-  buyerWallet: string,
-  amount: number,
-  purchaseId: string // Use purchaseId instead of slotId
-): Promise<string> {
-  const connection = new Connection(process.env.NEXT_PUBLIC_SOLANA_RPC_URL!, 'confirmed');
-  
-  const buyerPubKey = new PublicKey(buyerWallet);
-  const treasuryPubKey = new PublicKey(TREASURY_WALLET!);
-  const usdcMintPubKey = new PublicKey(USDC_MINT);
+export function getConnection() {
+  return new Connection(getServerRpcUrl(), 'confirmed');
+}
 
-  // Get mint info for decimals
-  const mintInfo = await getMint(connection, usdcMintPubKey);
-  const totalAmount = BigInt(Math.round(amount * Math.pow(10, mintInfo.decimals)));
+export function isValidSolanaAddress(address: string): boolean {
+  try {
+    // Se aceptan también direcciones fuera de la curva (p. ej. vaults de Squads)
+    return new PublicKey(address).toBase58() === address;
+  } catch {
+    return false;
+  }
+}
 
-  // Get token accounts
-  const buyerTokenAccount = await getAssociatedTokenAddress(usdcMintPubKey, buyerPubKey);
-  const treasuryTokenAccount = await getAssociatedTokenAddress(usdcMintPubKey, treasuryPubKey);
+interface BuildParams {
+  buyerWallet: string;
+  creatorWallet: string;
+  creatorMicro: bigint;
+  treasuryWallet: string | null;
+  feeMicro: bigint;
+  purchaseId: string;
+}
 
-  // 1. Memo instruction (to link tx to database)
-  const memoInstruction = new TransactionInstruction({
-    keys: [{ pubkey: buyerPubKey, isSigner: true, isWritable: true }],
-    data: Buffer.from(`blinkboard_purchase:${purchaseId}`, 'utf-8'),
-    programId: new PublicKey('MemoSq4gqAB2Cc9BnG6zbxDBZid3p6fG9iz9zV7Aup'),
-  });
+/**
+ * Construye la transacción de pago:
+ *   1. Memo con el ID de la compra (para enlazar la tx con la base de datos)
+ *   2. Crea (si no existe) la cuenta USDC del creador, pagada por el comprador
+ *   3. Transferencia USDC comprador -> creador
+ *   4. (Opcional) Transferencia de la comisión comprador -> plataforma
+ */
+export async function createUSDCTransferTransaction(params: BuildParams): Promise<string> {
+  const connection = getConnection();
+  const buyer = new PublicKey(params.buyerWallet);
+  const creator = new PublicKey(params.creatorWallet);
+  const mint = new PublicKey(USDC_MINT);
 
-  // 2. Transfer instruction
-  const transferInstruction = createTransferCheckedInstruction(
-    buyerTokenAccount,
-    usdcMintPubKey,
-    treasuryTokenAccount,
-    buyerPubKey,
-    totalAmount,
-    mintInfo.decimals
+  const buyerAta = getAssociatedTokenAddressSync(mint, buyer);
+  const creatorAta = getAssociatedTokenAddressSync(mint, creator, true);
+
+  const tx = new Transaction();
+  tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 10_000 }));
+  tx.add(
+    new TransactionInstruction({
+      keys: [{ pubkey: buyer, isSigner: true, isWritable: false }],
+      data: Buffer.from(`${MEMO_PREFIX}${params.purchaseId}`, 'utf-8'),
+      programId: new PublicKey(MEMO_PROGRAM_ID),
+    })
+  );
+  tx.add(createAssociatedTokenAccountIdempotentInstruction(buyer, creatorAta, creator, mint));
+  tx.add(
+    createTransferCheckedInstruction(buyerAta, mint, creatorAta, buyer, params.creatorMicro, USDC_DECIMALS)
   );
 
-  const transaction = new Transaction().add(memoInstruction, transferInstruction);
-  
-  // Set recent blockhash and fee payer
-  const { blockhash } = await connection.getLatestBlockhash();
-  transaction.recentBlockhash = blockhash;
-  transaction.feePayer = buyerPubKey;
+  if (params.treasuryWallet && params.feeMicro > BigInt(0)) {
+    const treasury = new PublicKey(params.treasuryWallet);
+    const treasuryAta = getAssociatedTokenAddressSync(mint, treasury, true);
+    tx.add(createAssociatedTokenAccountIdempotentInstruction(buyer, treasuryAta, treasury, mint));
+    tx.add(createTransferCheckedInstruction(buyerAta, mint, treasuryAta, buyer, params.feeMicro, USDC_DECIMALS));
+  }
 
-  // Serialize without signatures (wallet will sign)
-  const serializedTransaction = transaction.serialize({
-    requireAllSignatures: false,
-    verifySignatures: false,
-  });
+  const { blockhash } = await connection.getLatestBlockhash('confirmed');
+  tx.recentBlockhash = blockhash;
+  tx.feePayer = buyer;
 
-  return serializedTransaction.toString('base64');
+  return tx.serialize({ requireAllSignatures: false, verifySignatures: false }).toString('base64');
 }
